@@ -272,6 +272,7 @@ def update(self, instance, validated_data):
         return instance
 ```
 [к содержанию](#содержание)
+
 #### Сериализация нескольких объектов
 ```python
 queryset = Book.objects.all()
