@@ -11,7 +11,7 @@ Custom cheat-sheet for DRF tools and features
      - [Десериализация объектов](#десериализация-объектов)
      - [Сохранение экземпляров модели](#сохранение-экземпляров-модели)
      - [Валидация](#валидация)
-     - [Доступ к .instance and .initial_data](#доступ-к-instance-and-initial-data)
+     - [Доступ к instance and initial_data](#доступ-к-instance-and-initial-data)
      - [Частичное обновление](#частичное-обновление)
      - [Вложенные сложные объекты](#вложенные-сложные-объекты)
      - [Записываемые вложенные представления](#записываемые-вложенные-представления)
@@ -156,7 +156,7 @@ class BlogPostSerializer(serializers.Serializer):
         return value
 ```
 
-#### Доступ к .instance and .initial_data
+#### Доступ к instance and initial_data
 ```python
 # .instance содержит объект (или queryset), который передан в сериализатор:
 
