@@ -396,6 +396,7 @@ class AccountSerializer(serializers.ModelSerializer):
         read_only_fields = ['account_name']
 ```
 Полями для чтения по умолчанию будут поля типа `AutoField` и поля со свойством `editable=False`.
+Если поле, которое должно быть только для чтения, является частью ограничение `unique_together`, то ему нужно установить `read_only=True` и задать значение по-умолчанию: 
 
 ```python
 # В джанго модели поля, которые должны быть уникальны в своей комбинации, перечисляются в `unique_together`
