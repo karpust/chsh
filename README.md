@@ -18,6 +18,19 @@ Custom cheat-sheet for DRF tools and features
      - [Сериализация нескольких объектов](#сериализация-нескольких-объектов)
      - [Включение дополнительного контекста](#включение-дополнительного-контекста)
    - [1.2. ModelSerializer](#12-modelserializer)
+     - [Выбор полей](#выбор-полей)
+     - [Указание вложенной сериализации](#указание-вложенной-сериализации)
+     - [Явный выбор полей](#явный-выбор-полей)
+     - [Указание полей для чтения](#указание-полей-для-чтения)
+     - [Дополнительные аргументы и изменение полей модели](#дополнительные-аргументы-и-изменение-полей-модели)
+     - [Настройка сопоставления полей](#настройка-сопоставления-полей)
+     - [API field class and field kwargs](#api-field-class-and-field-kwargs)
+
+
+
+
+
+
 2. [Виды (Views)](#виды-views)
 3. [Аутентификация (Authentication)](#аутентификация-authentication)
 4. [Разрешения (Permissions)](#разрешения-permissions)
@@ -296,6 +309,229 @@ serializer.data
 ```
 
 ### 1.2. ModelSerializer
+Если есть модель джанго, то этот класс автоматически создаст сериализатор с полями из этой модели, встроенной валидацией, и встроенными методами create, update:
+```python
+# объявление сериализатора:
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+```
+Все отношения модели(внешние ключи) передадутся в поле типа PrimaryKeyRelatedField.
+Обратные отношения требуют явного включения.
+```python
+# посмотреть созданный сериализатор и его поля:
+# python manage.py shell:
+>>> from myapp.serializers import AccountSerializer
+>>> serializer = AccountSerializer()
+>>> print(repr(serializer))
+AccountSerializer():
+    id = IntegerField(label='ID', read_only=True)
+    name = CharField(allow_blank=True, max_length=100, required=False)
+    owner = PrimaryKeyRelatedField(queryset=User.objects.all())
+```
+#### Выбор полей
+Можно выбрать какие поля модели передавать в сериализатор:
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+        # fields = '__all__'  # или все поля
+```
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        exclude = ['users']  # исключить поля
+```
+
+#### Указание вложенной сериализации
+`depth` указывает уровень вложенности связанных объектов, которые будут сериализованы.
+По умолчанию ModelSerializer использует первичные ключи для указания отношений, но
+если поле связано с другой моделью или является тоже сериализатором, тогда в это поле будет включен не только id, а все поля той модели(сериализатора).
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+        depth = 1
+```
+```json
+{
+    "id": 1,
+    "account_name": "My Account",
+    "users": [
+        {
+            "id": 10,
+            "username": "johndoe",
+            "email": "johndoe@example.com"
+        }
+    ],
+    "created": "2024-12-28T12:34:56Z"
+}
+
+```
+Однако, большая глубина замедляет процесс сериализации.
+#### Явный выбор полей
+Если нужно добавить поля которых нет в модели или переопределить существующие
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    url = serializers.CharField(source='get_absolute_url', read_only=True)
+    groups = serializers.PrimaryKeyRelatedField(many=True)
+
+    class Meta:
+        model = Account
+        fields = ['url', 'groups']
+```
+#### Указание полей для чтения
+Идивидуально для поля при его объявлении указать `read_only=True`.
+Или передать в списке несколько полей через `read_only_fields`
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+        read_only_fields = ['account_name']
+```
+Полями для чтения по умолчанию будут поля типа `AutoField` и поля со свойством `editable=False`.
+Если поле, которое должно быть только для чтения, является частью ограничение `unique_together`
+
+```python
+# В джанго модели поля, которые должны быть уникальны в своей комбинации, перечисляются в `unique_together`
+class MyModel(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    identifier = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ('user', 'identifier')
+```
+Все поля находящиеся в `unique_together` будут участвовать в валидации, тк drf должен проверить, что выполняются условия этого ограничения. 
+Если просто запретить редактирование через `read_only=True`, то при создании нового объекта валидация провалится, тк значение поля окажется незаданным, поэтому полю нужно определить значение по умолчанию.
+```python
+class MySerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(
+        read_only=True,
+        default=serializers.CurrentUserDefault()
+        # в поле юзер передастся текущий юзер
+    )
+
+    class Meta:
+        model = MyModel
+        fields = ['user', 'identifier']
+```
+#### Дополнительные аргументы и изменение полей модели
+Чтобы изменить поля модели переданные в сериализатор, нужно их передать в `extra_kwargs`
+```python
+class CreateUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['email', 'username', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def create(self, validated_data):
+        user = User(
+            email=validated_data['email'],
+            username=validated_data['username']
+        )
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
+```
+`extra_kwargs` нужны для изменения существующих полей модели, поэтому
+изменения применятся при неявном объявлении поля(передано из модели), и не применятся при явном объявлении(в сериализаторе)
+```python
+class MyModelSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(read_only=True)  # Поле объявлено явно.
+
+    class Meta:
+        model = MyModel
+        fields = ['name', 'description']
+        extra_kwargs = {
+            'name': {'write_only': True},  # Настройки будут проигнорированы.
+        }
+```
+#### Настройка сопоставления полей
+`serializer_field_mapping` - это атрибут класса ModelSerializer, который представляет собой словарь, где ключи — это типы полей модели (models.Field), а значения — соответствующие классы полей сериализатора (serializers.Field). Используется для быстрого сопоставления и создания кастомных полей.
+```python
+from django.db import models
+from rest_framework import serializers
+
+serializer_field_mapping = {
+    models.AutoField: serializers.IntegerField,
+    models.CharField: serializers.CharField,
+    models.TextField: serializers.CharField,
+    models.IntegerField: serializers.IntegerField,
+    models.FloatField: serializers.FloatField,
+    models.BooleanField: serializers.BooleanField,
+    models.DateField: serializers.DateField,
+    models.DateTimeField: serializers.DateTimeField,
+    models.ForeignKey: serializers.PrimaryKeyRelatedField,
+    # и другие поля
+}
+```
+создание кастомного поля:
+```python
+from rest_framework import serializers
+
+class CustomCharField(serializers.CharField):
+    def to_representation(self, value):
+        return value.upper()  # Все значения переводятся в верхний регистр.
+```
+переопределение сопоставления:
+```python
+from rest_framework import serializers
+from django.db import models
+
+class MyModelSerializer(serializers.ModelSerializer):
+    # Переопределяем маппинг, не изменяя оригинальный
+    serializer_field_mapping = serializers.ModelSerializer.serializer_field_mapping.copy()
+    serializer_field_mapping[models.CharField] = CustomCharField
+
+    class Meta:
+        model = MyModel
+        fields = '__all__'
+```
+`serializer_related_field` - определяет какой тип поля сериализатора будет использован для отношений(ForeignKey, ManyToManyField, OneToOneField) по умолчанию.
+для `ModelSerializer` используется `serializers.PrimaryKeyRelatedField` и означает, что связанные объекты будут представлены их первичным ключом.
+
+For `HyperlinkedModelSerializer` this defaults to `serializers.HyperlinkedRelatedField` и означает что связанное поле будет представлено как гиперссылка на URL-адрес, связанный с этим объектом.
+
+`serializer_url_field` - атрибут класса который используется для url-полей, его значение по умолчанию serializers.HyperlinkedIdentityField
+
+`serializer_choice_field` - `Defaults to serializers.ChoiceField`
+
+#### API field_class и field_kwargs
+В API Django REST Framework методы для генерации полей сериализатора автоматически определяют класс поля и аргументы для каждого поля модели. Они возвращают кортеж: (field_class, field_kwargs).
+
+- `build_standard_field`(self, field_name, model_field)
+Генерирует поле сериализатора для стандартного поля модели.
+По умолчанию выбирает класс поля на основе атрибута `serializer_field_mapping`.
+- `build_relational_field`(self, field_name, relation_info)
+Создаёт поле для отношений (ForeignKey, ManyToManyField и т.д.).
+Использует `serializer_related_field` для выбора класса поля.
+Аргумент `relation_info` — именованный кортеж с информацией:
+`model_field`: поле модели.
+related_model: связанная модель.
+to_many: булево значение (множественное отношение или нет).
+has_through_model: булево значение (есть ли промежуточная модель, например, в ManyToManyField с through).
+- `build_nested_field`(self, field_name, relation_info, nested_depth)
+Генерирует поле для вложенного сериализатора, если установлена опция depth.
+Динамически создаёт вложенный сериализатор (на основе `ModelSerializer` или `HyperlinkedModelSerializer`).
+Аргумент `nested_depth`: текущая глубина вложенности (`depth` - 1).
+Использует `relation_info`, аналогично `build_relational_field`.
+- `build_property_field`(self, field_name, model_class)
+Генерирует поле для свойства или метода модели без аргументов.
+По умолчанию возвращает поле `ReadOnlyField`.
+- `build_url_field`(self, field_name, model_class)
+Создаёт поле для ссылки на сам объект (поле url).
+По умолчанию возвращает `HyperlinkedIdentityField`.
+- `build_unknown_field`(self, field_name, model_class)
+Вызывается, если поле не связано с полем модели или свойством.
+По умолчанию вызывает ошибку.
+Можно переопределить, чтобы обрабатывать такие случаи.
+
+### HyperlinkedModelSerializer
 
 ### 2. **Как работают ссылки**
 - Заголовки в Markdown автоматически превращаются в якоря, к которым можно переходить с помощью ссылок.
