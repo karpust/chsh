@@ -25,7 +25,9 @@ Custom cheat-sheet for DRF tools and features
      - [Дополнительные аргументы и изменение полей модели](#дополнительные-аргументы-и-изменение-полей-модели)
      - [Настройка сопоставления полей](#настройка-сопоставления-полей)
      - [Классы и аргументы полей](#классы-и-аргументы-полей)
-     - 
+   - [1.3. HyperlinkedModelSerializer](#13-hyperlinkedmodelserializer)
+     - [Абсолютные и относительные ссылки](#aбсолютные-и-относительные-ссылки)
+     - [Как определяются представления для гиперссылок](#как-определяются-представления-для-гиперссылок)
 
 
 
@@ -536,7 +538,106 @@ has_through_model: булево значение (есть ли промежут
 
 [к содержанию](#содержание)
 
-### HyperlinkedModelSerializer
+### 1.3. HyperlinkedModelSerializer
+`HyperlinkedModelSerializer` похож на `ModelSerializer`, но для отношений использует гиперссылки, а не первичные ключи.
+вместо поля с первичным ключом имеет поле с url по умолчанию:
+поле url имеет тип `HyperlinkedIdentityField`, а отношения реализуются полем `HyperlinkedRelatedField`
+
+```python
+class AccountSerializer(serializers.HyperlinkedModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['url', 'id', 'account_name', 'users', 'created']
+        # так первичный ключ можно задать явно (id)
+```
+`HyperlinkedIdentityField` получает ссылку на сам объект(ссылку на конкретную книгу):
+```python
+class BookSerializer(serializers.HyperlinkedModelSerializer):
+    url = serializers.HyperlinkedIdentityField(view_name='book-detail')
+    # view_name='book-detail' указывает на имя view, которое используется 
+    # для отображения данных конкретной книги.
+    
+    class Meta:
+        model = Book
+        fields = ['url', 'title', 'author']
+
+```
+```json
+{
+    "url": "http://example.com/books/1/",
+    "title": "The Great Gatsby",
+    "author": "F. Scott Fitzgerald"
+}
+```
+`HyperlinkedRelatedField` получает ссылку на связанный объект(ссылка на автора, связанного с книгой):
+```python
+class BookSerializer(serializers.HyperlinkedModelSerializer):
+    author = serializers.HyperlinkedRelatedField(queryset=Author.objects.all(), view_name='author-detail')
+
+    class Meta:
+        model = Book
+        fields = ['url', 'title', 'author']
+
+```
+```json
+{
+    "url": "http://example.com/books/1/",
+    "title": "The Great Gatsby",
+    "author": "http://example.com/authors/1/"
+}
+```
+#### Абсолютные и относительные ссылки
+При создании экземпляра класса `HyperlinkedModelSerializer` нужно передать контекстный словарь с запросом, чтобы гиперссылка была полным адресом url - содержала в себе имя хоста, а не была относительной ссылкой:
+```python
+serializer = AccountSerializer(queryset, context={'request': request})
+# http://api.example.com/accounts/1/
+# rather than: /accounts/1/
+```
+Если нужно использовать относительную ссылку, в контекстный словарь нужно передать `{'request': None}`
+
+#### Как определяются представления для гиперссылок
+Нужно определить какие представления использовать для гиперссылок на экземпляры модели. 
+По умолчанию ожидается, что гиперссылка будет соответствовать стилю `{имя_модели}-detail` и искать экземпляр по первичному ключу.
+Такое поведение можно изменить, переопределив параметры `view_name` и `lookup_field`:
+
+объявив их неявно (используя `extra_kwargs`) :
+```python
+class AccountSerializer(serializers.HyperlinkedModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['account_url', 'account_name', 'users', 'created']
+        extra_kwargs = {
+            'url': {'view_name': 'accounts', 'lookup_field': 'account_name'},
+            'users': {'lookup_field': 'username'}
+        }
+        # поле url будет генерировать гиперссылку на основе view_name='accounts' 
+        # и значения поля account_name вместо дефолтного pk
+        # http://api.example.com/accounts/my-account-name/
+        # вместо: 
+        # http://api.example.com/accounts/1/
+```
+
+или объявив явно:
+```python
+class AccountSerializer(serializers.HyperlinkedModelSerializer):
+    url = serializers.HyperlinkedIdentityField(
+        view_name='accounts',
+        lookup_field='slug'
+    )
+    users = serializers.HyperlinkedRelatedField(
+        view_name='user-detail',
+        lookup_field='username',
+        many=True,
+        read_only=True
+    )
+
+    class Meta:
+        model = Account
+        fields = ['url', 'account_name', 'users', 'created']
+```
+`lookup_field` - атрибут, который обозначает какое поле модели использовать для поиска объекта, по-умолчанию pk.
+`view_name` — это атрибут, с именем представления, которое будет использовано для формирования URL гиперссылки.
+Чтобы проконтролировать правильную настройку имен представлений (view names) и полей для поиска (lookup fields) для гиперссылки, нужно использовать отладку с repr() для экземпляра `HyperlinkedModelSerializer`.
 
 ### 2. **Как работают ссылки**
 - Заголовки в Markdown автоматически превращаются в якоря, к которым можно переходить с помощью ссылок.
