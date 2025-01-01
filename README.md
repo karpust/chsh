@@ -586,6 +586,7 @@ class BookSerializer(serializers.HyperlinkedModelSerializer):
     "author": "http://example.com/authors/1/"
 }
 ```
+
 #### Абсолютные и относительные ссылки
 При создании экземпляра класса `HyperlinkedModelSerializer` нужно передать контекстный словарь с запросом, чтобы гиперссылка была полным адресом url - содержала в себе имя хоста, а не была относительной ссылкой:
 ```python
