@@ -24,7 +24,7 @@ Custom cheat-sheet for DRF tools and features
      - [Указание полей для чтения](#указание-полей-для-чтения)
      - [Дополнительные аргументы и изменение полей модели](#дополнительные-аргументы-и-изменение-полей-модели)
      - [Настройка сопоставления полей](#настройка-сопоставления-полей)
-     - [API field class and field kwargs](#api-field-class-and-field-kwargs)
+     - [API field_class and field_kwargs](#api-field-class-and-field-kwargs)
 
 
 
