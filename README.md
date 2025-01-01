@@ -502,7 +502,7 @@ For `HyperlinkedModelSerializer` this defaults to `serializers.HyperlinkedRelate
 
 `serializer_choice_field` - `Defaults to serializers.ChoiceField`
 
-#### API field_class и field_kwargs
+#### Классы и аргументы полей
 В API Django REST Framework методы для генерации полей сериализатора автоматически определяют класс поля и аргументы для каждого поля модели. Они возвращают кортеж: (field_class, field_kwargs).
 
 - `build_standard_field`(self, field_name, model_field)
