@@ -28,6 +28,9 @@ Custom cheat-sheet for DRF tools and features
    - [1.3. HyperlinkedModelSerializer](#13-hyperlinkedmodelserializer)
      - [Абсолютные и относительные ссылки](#абсолютные-и-относительные-ссылки)
      - [Как определяются представления для гиперссылок](#как-определяются-представления-для-гиперссылок)
+   - [1.4. ListSerializer](#14-listserializer)
+     - [Настройка поведения ListSerializer](#настройка-поведения-listserializer)
+     - [Настройка инициализации ListSerializer при передаче many=True](#настройка-инициализации-listserializer-при-передаче-many=True)
 
 
 
@@ -639,6 +642,107 @@ class AccountSerializer(serializers.HyperlinkedModelSerializer):
 `lookup_field` - атрибут, который обозначает какое поле модели использовать для поиска объекта, по-умолчанию pk.
 `view_name` — это атрибут, с именем представления, которое будет использовано для формирования URL гиперссылки.
 Чтобы проконтролировать правильную настройку имен представлений (view names) и полей для поиска (lookup fields) для гиперссылки, нужно использовать отладку с repr() для экземпляра `HyperlinkedModelSerializer`.
+
+### 1.4. ListSerializer
+`ListSerializer` позволяет сериализовать и валидировать несколько объектов одновременно. Обычно его не вызывают явно, но если установить `many=True` при создании экземпляра сериализатора, то будет вызван класс `ListSerializer` и создан его экземпляр.
+
+еще аргументы `ListSerializer`:
+
+`allow_empty` - разрешает пустой список, True by default
+
+`max_length` - ограничивает максимальную длину списка, None by default
+
+`min_length` - ограничивает минимальную длину списка, None by default
+
+#### Настройка поведения `ListSerializer`
+При множественном создании вызывается `create()` for each item in the list.
+```python
+# встроенный create():
+def create(self, validated_data):
+    return [self.child.create(attrs) for attrs in validated_data]
+    # child.create() вызывает create() дочернего сериализатора.
+    # для каждого элемента отдельный запрос в базу данных.
+```
+можно переопределить встроенный create():
+```python
+class BookListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        books = [Book(**item) for item in validated_data]
+        return Book.objects.bulk_create(books)
+        # массовое создание объектов с методом bulk_create():
+        # используется всего один запрос к бд
+
+class BookSerializer(serializers.Serializer):
+    ...
+    class Meta:
+        list_serializer_class = BookListSerializer
+```
+
+Множественное обновление не поддерживается классом `ListSerializer` by default.
+Тк dfr не может сам решить что нужно создать, что обновить, что удалить. 
+Это нужно указывать явно.
+
+Для этого нужно явно объявить поле `id`, тк при неявном создании оно `read_only` и удаляется при обновлении. 
+
+При явном объявлении поле `id` доступно в методе `update()`
+```python
+class BookListSerializer(serializers.ListSerializer):
+    def update(self, instance, validated_data):
+        # Maps for id->instance and id->data item.
+        book_mapping = {book.id: book for book in instance}  # объекты из бд
+        data_mapping = {item['id']: item for item in validated_data}  # входящие данные
+
+        # Perform creations and updates.
+        ret = []
+        for book_id, data in data_mapping.items():
+            book = book_mapping.get(book_id, None)
+            if book is None:
+                ret.append(self.child.create(data))
+                # если объекта нет в бд, он создается
+            else:
+                ret.append(self.child.update(book, data))
+                # если есть, то обновляется
+
+        # Perform deletions.
+        for book_id, book in book_mapping.items():
+            if book_id not in data_mapping:
+            # если объекта базы данных нет во входящих данных, удаляем его из бд
+                book.delete()
+
+        return ret
+
+class BookSerializer(serializers.Serializer):
+    # We need to identify elements in the list using their primary key,
+    # so use a writable field here, rather than the default which would be read-only.
+    id = serializers.IntegerField()
+    ...
+
+    class Meta:
+        list_serializer_class = BookListSerializer
+```
+
+#### Настройка инициализации `ListSerializer` при передаче many=True
+нужно понять какие аргументы будут переданы в __init__() для существующего(дочернего) сериализатора и для будущего(родительского) `ListSerializer`.
+По умолчанию передаются все аргументы кроме валидаторов и пользовательских именованных аргументов(они только для дочернего).
+
+Можно это изменить и передать в родительский то, что нужно:
+```python
+@classmethod
+    def many_init(cls, *args, **kwargs):
+        # Instantiate the child serializer.
+        kwargs['child'] = cls()
+        # Instantiate the parent list serializer.
+        return CustomListSerializer(*args, **kwargs)
+```
+
+
+
+
+
+
+
+
+
 
 ### 2. **Как работают ссылки**
 - Заголовки в Markdown автоматически превращаются в якоря, к которым можно переходить с помощью ссылок.
