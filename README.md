@@ -30,7 +30,7 @@ Custom cheat-sheet for DRF tools and features
      - [Как определяются представления для гиперссылок](#как-определяются-представления-для-гиперссылок)
    - [1.4. ListSerializer](#14-listserializer)
      - [Настройка поведения ListSerializer](#настройка-поведения-listserializer)
-     - [Настройка инициализации ListSerializer при передаче many=True](#настройка-инициализации-listserializer-при-передаче-many=True)
+     - [Настройка инициализации ListSerializer при передаче many is True](#настройка-инициализации-listserializer-при-передаче-many-is-True)
 
 
 
@@ -721,7 +721,7 @@ class BookSerializer(serializers.Serializer):
         list_serializer_class = BookListSerializer
 ```
 
-#### Настройка инициализации `ListSerializer` при передаче many=True
+#### Настройка инициализации `ListSerializer` при передаче many is True
 нужно понять какие аргументы будут переданы в __init__() для существующего(дочернего) сериализатора и для будущего(родительского) `ListSerializer`.
 По умолчанию передаются все аргументы кроме валидаторов и пользовательских именованных аргументов(они только для дочернего).
 
