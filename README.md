@@ -680,6 +680,7 @@ class BookSerializer(serializers.Serializer):
     class Meta:
         list_serializer_class = BookListSerializer
 ```
+[к содержанию](#содержание)
 
 Множественное обновление не поддерживается классом `ListSerializer` by default.
 Тк dfr не может сам решить что нужно создать, что обновить, что удалить. 
@@ -787,6 +788,7 @@ def all_high_scores(request):
     serializer = HighScoreSerializer(queryset, many=True)
     return Response(serializer.data)
 ```
+[к содержанию](#содержание)
 
 #### Read-write BaseSerializer
 Для создания read-write сериализатора нужно реализовать метод `to_internal_value()`.
