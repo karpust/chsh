@@ -31,6 +31,9 @@ Custom cheat-sheet for DRF tools and features
    - [1.4. ListSerializer](#14-listserializer)
      - [Настройка поведения ListSerializer](#настройка-поведения-listserializer)
      - [Настройка инициализации ListSerializer при неявном объявлении](#настройка-инициализации-listserializer-при-неявном-объявлении)
+   - [1.5. BaseSerializer](#15-baseserializer)
+     - [Read-only сериализатор на основе BaseSerializer](#read-only-сериализатор-на-основе-baseserializer)
+     - [Read-write BaseSerializer](#read-write-baseserializer)
 
 
 
@@ -735,7 +738,97 @@ class BookSerializer(serializers.Serializer):
         return CustomListSerializer(*args, **kwargs)
 ```
 
+### 1.5. BaseSerializer
+`BaseSerializer` — базовый класс, который не предоставляет встроенной логики для работы с полями, валидацией или моделями. Требует явной реализации методов `to_representation` и `to_internal_value` для сериализации и десериализации данных. Имеет более низкий уровень абстракции чем `Serializer`. Используется для более кастомизированных случаев, когда остальные не подходят.
 
+Методы которые нужно реализовать, тк по умолчанию вернут NotImplementedError:
+
+`to_representation()` - реализовать метод, для сериализации (read only)
+(преобразование объекта сериализации в читаемый формат).
+
+`to_internal_value()` - реализовать метод, для десериализации (write)
+
+`create()`, `update()` - реализовать методы, чтобы сохранять экземпляры модели.
+
+#### Read-only сериализатор на основе BaseSerializer
+для создания read-only сериализатора нужно реализовать метод `to_representation()`. 
+Он отвечает за преобразование объекта модели в словарь данных, который будет возвращен клиенту.
+```python
+class HighScore(models.Model):
+    # есть модель
+    created = models.DateTimeField(auto_now_add=True)
+    player_name = models.CharField(max_length=10)
+    score = models.IntegerField()
+```
+```python
+class HighScoreSerializer(serializers.BaseSerializer):
+    def to_representation(self, instance):
+        # instance это экземпляр модели
+        # преобразует объект модели в словарь и вернет его
+        return {
+            'score': instance.score,
+            'player_name': instance.player_name
+        }
+```
+представление для одного объекта модели:
+```python
+@api_view(['GET'])
+def high_score(request, pk):
+    instance = HighScore.objects.get(pk=pk)
+    serializer = HighScoreSerializer(instance)
+    return Response(serializer.data)
+```
+
+представление для всех объектов модели:
+```python
+@api_view(['GET'])
+def all_high_scores(request):
+    queryset = HighScore.objects.order_by('-score')
+    serializer = HighScoreSerializer(queryset, many=True)
+    return Response(serializer.data)
+```
+
+#### Read-write BaseSerializer
+Для создания read-write сериализатора нужно реализовать метод `to_internal_value()`.
+Он преобразовывает данные, полученные из запроса, во внутренние данные, для сохранения в бд, создания экземпляров модели.
+Метод `to_internal_value()` делает доступной валидацию с методами `is_valid()`, `validated_data`, `errors`. 
+
+```python
+class HighScoreSerializer(serializers.BaseSerializer):
+    def to_internal_value(self, data):
+        score = data.get('score')
+        player_name = data.get('player_name')
+
+        # Perform the data validation.
+        if not score:
+            raise serializers.ValidationError({
+                'score': 'This field is required.'
+            })
+        if not player_name:
+            raise serializers.ValidationError({
+                'player_name': 'This field is required.'
+            })
+        if len(player_name) > 10:
+            raise serializers.ValidationError({
+                'player_name': 'May not be more than 10 characters.'
+            })
+
+        # Return the validated values. This will be available as
+        # the `.validated_data` property.
+        return {
+            'score': int(score),
+            'player_name': player_name
+        }
+
+    def to_representation(self, instance):
+        return {
+            'score': instance.score,
+            'player_name': instance.player_name
+        }
+
+    def create(self, validated_data):
+        return HighScore.objects.create(**validated_data)
+```
 
 
 
