@@ -39,6 +39,13 @@ Custom cheat-sheet for DRF tools and features
      - [Наследование сериализатора](#наследование-сериализатора)
      - [Динамическое изменение полей](#динамическое-изменение-полей)
    - [1.7. Отношения сериализатора](#17-отношения-сериализатора)
+     - [Проверка отношений](#проверка-отношений)
+     - [API Reference](#api-reference)
+       - [StringRelatedField](#stringrelatedfield)
+       - [PrimaryKeyRelatedField](#primarykeyrelatedfield)
+       - [HyperlinkedRelatedField](#hyperlinkedrelatedfield)
+       - [SlugRelatedField](#slugrelatedfield)
+       - [HyperlinkedIdentityField](#hyperlinkedidentityfield)
 
 
 
@@ -937,11 +944,509 @@ print(UserSerializer(user))
 Такой способ позволяет динамически включать или исключать поля в сериализаторе, исходя из переданного списка fields. Если fields передан в конструктор, то только те поля, которые указаны в этом списке, будут сериализованы. Все остальные поля будут удалены из self.fields и не попадут в сериализованный результат.
 
 ### 1.7. Отношения сериализатора
+Реляционные поля служат для представления отношений между моделями
+(`ForeignKey`, `ManyToManyField` и `OneToOneField`, обратные и пользовательские отношения).
+
+DRF не оптимизирует запросы по умолчанию, это делает разработчик сам.
+Методы оптимизации запросов Django ORM, позволяют уменьшить количество запросов к бд и ускорить работу.
+`select_related` — для связей ForeignKey и OneToOneField, когда нужно сделать JOIN и получить данные сразу.
+`prefetch_related` — для связей ManyToManyField, reverse ForeignKey, или когда JOIN неудобен.
+
+`reverse ForeignKey`: есть автор и книга. у книги внешний ключ на автора. тогда обратным доступом будет author.book_set.all(), related_name не указан
+
+`select_related` получает за один запрос к бд все связанные данные, только для ForeignKey и OneToOneField:
+```python
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE)
+
+# Без select_related:
+books = Book.objects.all()
+for book in books:
+    print(book.author.name)  # Каждый вызов book.author делает отдельный запрос
+
+# С select_related:
+books = Book.objects.select_related('author')
+for book in books:
+    print(book.author.name)  # Один запрос с JOIN, связанные данные получены сразу
+```
+
+`prefetch_related` - используется для выполнения двух отдельных запросов и связывания результатов в Python, для ManyToManyField и reverse ForeignKey связей:
+```python
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='books')
+
+# Без prefetch_related:
+authors = Author.objects.all()
+for author in authors:
+    books = author.books.all()  # Отдельный запрос для каждого автора
+
+# С prefetch_related:
+authors = Author.objects.prefetch_related('books')
+for author in authors:
+    books = author.books.all()  # Один запрос для авторов и один для книг
+```
+
+пример с many=True:
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='title'
+    )
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+
+# For each album object, tracks should be fetched from database
+qs = Album.objects.all()
+print(AlbumSerializer(qs, many=True).data)
+```
+Для каждого объекта `Album` будет выполняться отдельный запрос к базе данных для получения связанных объектов `tracks`. Если в базе данных, например, 100 альбомов, Django выполнит 101 запрос: 1 запрос для получения всех альбомов и еще 100 запросов для получения связанных треков каждого альбома.
+
+```python
+qs = Album.objects.prefetch_related('tracks')  # prefetch_related bcz it's reverse ForeignKey
+# No additional database hits required
+print(AlbumSerializer(qs, many=True).data)
+```
+Теперь Django выполнит 2 запроса вместо 101:
+Один запрос для получения всех альбомов.
+Один запрос для получения всех связанных треков сразу.
+Django свяжет альбомы и их треки на уровне Python, избегая дополнительных обращений к базе данных при сериализации.
+
+#### Проверка отношений
+python manage.py shell
+```python
+>>> from myapp.serializers import AccountSerializer
+>>> serializer = AccountSerializer()
+>>> print(repr(serializer))
+AccountSerializer():
+    id = IntegerField(label='ID', read_only=True)
+    name = CharField(allow_blank=True, max_length=100, required=False)
+    owner = PrimaryKeyRelatedField(queryset=User.objects.all())
+```
+
+#### API Reference
+```python
+# модели для изучения реляционных полей
+class Album(models.Model):
+    album_name = models.CharField(max_length=100)
+    artist = models.CharField(max_length=100)
+
+class Track(models.Model):
+    album = models.ForeignKey(Album, related_name='tracks', on_delete=models.CASCADE)
+    order = models.IntegerField()
+    title = models.CharField(max_length=100)
+    duration = models.IntegerField()
+
+    class Meta:
+        unique_together = ['album', 'order']
+        ordering = ['order']
+
+    def __str__(self):
+        return '%d: %s' % (self.order, self.title)
+```
+
+##### StringRelatedField
+`rest_framework.relations.StringRelatedField`
+
+поле позволяет создавать строковое представление связанного объекта, используя метод `__str__()`
+
+аргументы:
+`many`.
+
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = serializers.StringRelatedField(many=True)  # field is read only.
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+```
+```json
+{
+    'album_name': 'Things We Lost In The Fire',
+    'artist': 'Low',
+    'tracks': [
+        '1: Sunflower',
+        '2: Whitetail',
+        '3: Dinosaur Act',
+```
+
+##### PrimaryKeyRelatedField
+поле позволяет создавать и принимать pk связанного объекта.
+для управления сериализацией/десериализацией значения первичного ключа. Например, pk_field=UUIDField(format='hex') сериализует pk в шестнадцатеричное представление.
+
+аргументы:
+
+`queryset`, `many`, `allow_null`,`pk_field`.
 
 
 
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']  # field is read-write
+```
+```json
+{
+    'album_name': 'Undun',
+    'artist': 'The Roots',
+    'tracks': [
+        89,
+        90,
+        91,
+        ...
+    ]
+}
+```
+
+##### HyperlinkedRelatedField
+поле позволяет создавать и принимать url связанного объекта.
+
+аргументы:
+
+`view_name`, `queryset`, `many`, `allow_null`, `lookup_field`, `lookup_url_kwarg`, `format`.
+
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = serializers.HyperlinkedRelatedField(  # field is read-write
+        many=True,
+        read_only=True,
+        view_name='track-detail'
+    )
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+```
+```json
+{
+    'album_name': 'Graceland',
+    'artist': 'Paul Simon',
+    'tracks': [
+        'http://www.example.com/api/tracks/45/',
+        'http://www.example.com/api/tracks/46/',
+        'http://www.example.com/api/tracks/47/',
+        ...
+    ]
+}
+```
+
+##### SlugRelatedField
+поле используется для представления связанного объекта с помощью определенного поля этого объекта.
+отображает значение указанного поля.
+
+аргументы:
+
+`slug_field`, `queryset`, `many`, `allow_null`.
 
 
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = serializers.SlugRelatedField(  # field is read-write
+        many=True,
+        read_only=True,
+        slug_field='title'
+     )
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+```
+```json
+{
+    'album_name': 'Dear John',
+    'artist': 'Loney Dear',
+    'tracks': [
+        'Airport Surroundings',
+        'Everything Turns to You',
+        'I Was Only Going Out',
+        ...
+    ]
+}
+```
+
+##### HyperlinkedIdentityField
+поле используется для создания ссылки, идентифицирующей объект. Оно автоматически генерирует URL для каждого экземпляра модели на основе указанного представления (view_name).
+
+аргументы:
+
+`view_name`, `lookup_field`, `lookup_url_kwarg`, `format`.
+
+```python
+class AlbumSerializer(serializers.HyperlinkedModelSerializer):
+    track_listing = serializers.HyperlinkedIdentityField(view_name='track-list')  # field is read-only
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'track_listing']
+```
+```json
+{
+    'album_name': 'The Eraser',
+    'artist': 'Thom Yorke',
+    'track_listing': 'http://www.example.com/api/track_list/12/',
+}
+```
+опиши аргументы!!!
+
+#### Вложенные отношения
+Вложенные отношения реализуются с помощью вложенных сериализаторов, которые используются как поля в основном сериализаторе.
+при этом данные связанного объекта оказываются вложенными в представление основного объекта.
+Сериализатор вернет не ссылку на вложенный объект в виде его pk или url итд, а вставит всю информацию объекта (сериализует объект и вложит результат в соответствующее поле).
+
+```python
+class TrackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Track
+        fields = ['order', 'title', 'duration']
+
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = TrackSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+```
+```python
+>>> album = Album.objects.create(album_name="The Grey Album", artist='Danger Mouse')
+>>> Track.objects.create(album=album, order=1, title='Public Service Announcement', duration=245)
+<Track: Track object>
+>>> Track.objects.create(album=album, order=2, title='What More Can I Say', duration=264)
+<Track: Track object>
+>>> Track.objects.create(album=album, order=3, title='Encore', duration=159)
+<Track: Track object>
+>>> serializer = AlbumSerializer(instance=album)
+>>> serializer.data
+{
+    'album_name': 'The Grey Album',
+    'artist': 'Danger Mouse',
+    'tracks': [
+        {'order': 1, 'title': 'Public Service Announcement', 'duration': 245},
+        {'order': 2, 'title': 'What More Can I Say', 'duration': 264},
+        {'order': 3, 'title': 'Encore', 'duration': 159},
+        ...
+    ],
+}
+```
+
+По умолчанию вложенные сериализаторы read-only.
+Чтобы вложенные сериализаторы могли изменять и создавать записи в бд, 
+нужно создать им методы `create()` and/or `update()`, где указать, как нужно сохранить дочерние отношения.
+```python
+class TrackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Track
+        fields = ['order', 'title', 'duration']
+
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = TrackSerializer(many=True)
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+
+    def create(self, validated_data):
+        tracks_data = validated_data.pop('tracks')
+        album = Album.objects.create(**validated_data)
+        for track_data in tracks_data:
+            Track.objects.create(album=album, **track_data)
+        return album
+
+>>> data = {
+    'album_name': 'The Grey Album',
+    'artist': 'Danger Mouse',
+    'tracks': [
+        {'order': 1, 'title': 'Public Service Announcement', 'duration': 245},
+        {'order': 2, 'title': 'What More Can I Say', 'duration': 264},
+        {'order': 3, 'title': 'Encore', 'duration': 159},
+    ],
+}
+>>> serializer = AlbumSerializer(data=data)
+>>> serializer.is_valid()
+True
+>>> serializer.save()
+<Album: Album object>
+```
+
+#### Пользовательские реляционные поля
+
+чтобы реализовать кастомное реляционное поле, нужно переопределить `RelatedField` и реализовать метод `.to_representation(self, value)`, где `value` экземпляр модели, который сериализуется.
+
+Чтобы поле было read-write, нужно также реализовать метод ` .to_internal_value(self, data)`
+
+Чтобы обеспечить динамический набор запросов, использующий `context`, нужно переопределить метод `.get_queryset(self)`, вместо выбора `.queryset` в классе или при инициализации поля.
+
+```python
+import time
+
+class TrackListingField(serializers.RelatedField):
+    def to_representation(self, value):
+        duration = time.strftime('%M:%S', time.gmtime(value.duration))
+        return 'Track %d: %s (%s)' % (value.order, value.name, duration)
+
+class AlbumSerializer(serializers.ModelSerializer):
+    tracks = TrackListingField(many=True)
+
+    class Meta:
+        model = Album
+        fields = ['album_name', 'artist', 'tracks']
+```
+```json
+{
+    'album_name': 'Sometimes I Wish We Were an Eagle',
+    'artist': 'Bill Callahan',
+    'tracks': [
+        'Track 1: Jim Cain (04:39)',
+        'Track 2: Eid Ma Clack Shaw (04:19)',
+        'Track 3: The Wind and the Dove (04:34)',
+        ...
+    ]
+}
+```
+
+#### Пользовательские поля с гиперссылками
+если для URL-адресов требуется более одного поля поиска, нужно изменить поведение поля с гиперссылкой.
+
+Для этого нужно переопределить `HyperlinkedRelatedField` и его методы:
+
+`get_url(self, obj, view_name, request, format)`- используется для сопоставления объекта с его url.
+
+`get_object(self, view_name, view_args, view_kwargs)` - чтобы поле с гиперссылкой было read-write, чтобы сопоставить полученный url с объектом, который url представляет.
+
+```python
+# /api/<organization_slug>/customers/<customer_pk>/
+
+
+from rest_framework import serializers
+from rest_framework.reverse import reverse
+
+class CustomerHyperlink(serializers.HyperlinkedRelatedField):
+    # We define these as class attributes, so we don't need to pass them as arguments.
+    view_name = 'customer-detail'
+    queryset = Customer.objects.all()
+
+    def get_url(self, obj, view_name, request, format):
+        url_kwargs = {
+            'organization_slug': obj.organization.slug,
+            'customer_pk': obj.pk
+        }
+        return reverse(view_name, kwargs=url_kwargs, request=request, format=format)
+
+    def get_object(self, view_name, view_args, view_kwargs):
+        lookup_kwargs = {
+           'organization__slug': view_kwargs['organization_slug'],
+           'pk': view_kwargs['customer_pk']
+        }
+        return self.get_queryset().get(**lookup_kwargs)
+```
+```text
+Наследование от HyperlinkedRelatedField
+Класс CustomerHyperlink наследуется от serializers.HyperlinkedRelatedField, 
+чтобы создать поле, которое возвращает 
+URL на объект Customer в сериализованном виде.
+
+Определение view_name и queryset
+view_name = 'customer-detail' — указывает на имя представления,
+которое будет использоваться для генерации URL.
+queryset = Customer.objects.all() — задает набор объектов, 
+по которым будет выполняться поиск при валидации.
+
+Метод get_url 
+формирует URL для объекта Customer. 
+Вместо использования только pk объекта, он добавляет два параметра:
+organization_slug — slug организации, к которой принадлежит клиент.
+customer_pk — первичный ключ клиента.
+Метод вызывает функцию reverse, которая создает URL на основе 
+имени представления (view_name) и переданных аргументов (url_kwargs).
+
+Пример работы:
+Если у объекта Customer:
+organization.slug = "my-organization"
+pk = 5
+То метод сформирует URL примерно такого вида:
+http://example.com/organizations/my-organization/customers/5/
+
+
+Метод get_object
+используется для получения объекта Customer при валидации 
+входных данных (например, при обработке POST или PUT запросов).
+
+view_kwargs содержит параметры, извлеченные из URL 
+(например, organization_slug и customer_pk).
+lookup_kwargs формируется для поиска объекта:
+organization__slug — фильтрует по slug организации.
+pk — фильтрует по первичному ключу клиента.
+Метод вызывает get_queryset().get(**lookup_kwargs) 
+для получения объекта Customer.
+Пример работы:
+Если клиент отправляет запрос с таким URL:
+http://example.com/organizations/my-organization/customers/5/
+
+То view_kwargs будет содержать:
+{
+    'organization_slug': 'my-organization',
+    'customer_pk': 5
+}
+Метод выполнит запрос:
+SELECT * FROM customer 
+WHERE organization_slug = 'my-organization' AND id = 5;
+```
+
+#### Заметки
+
+##### queryset
+для полей отношений read-only queryset не нужен.
+он нужен только для записываемых полей, тк определяет набор объектов для поиска при создании обновлении записей бд.
+если поле записываемое - оно принимает входные данные, и queryset нужен для того чтобы в нем найти соответствующий входным данным объект.
+сопоставить входные данные с объектом модели, а значит, не сможет корректно создать или обновить запись.
+
+##### Настройка отображения HTML
+По умолчанию для создания строкового представления объектов в выпадающем списке(choices) используется метод __str__.
+Чтобы это изменить нужно переопределить `display_value()` подкласса `RelatedField`
+```python
+class TrackPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    def display_value(self, instance):
+        return 'Track: %s' % (instance.title)
+```
+```html
+<!--было, по умолчанию-->
+<select name="tracks">
+    <option value="1">Track 1</option>
+    <option value="2">Track 2</option>
+    <option value="3">Track 3</option>
+</select>
+
+<!--после переопределения display_value-->
+<select name="tracks">
+    <option value="1">Track: Track 1</option>
+    <option value="2">Track: Track 2</option>
+    <option value="3">Track: Track 3</option>
+</select>
+
+
+```
+
+##### Выберите отсечение полей
+
+##### Обратные отношения
+
+##### Общие отношения
+
+##### ManyToManyFields со сквозной моделью
 
 
 
