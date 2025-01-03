@@ -832,6 +832,109 @@ class HighScoreSerializer(serializers.BaseSerializer):
         return HighScore.objects.create(**validated_data)
 ```
 
+### 1.6. Advanced serializer usage
+
+#### Переопределение поведения сериализации и десериализации
+в классе Serializer определены методы `to_representation`(отвечает за сериализацию) и `to_internal_value`(отвечает за десериализацию), которые можно переопределить.
+
+`to_representation(self, instance)` - принимает объект модели, возвращает питоновский тип данных(зависит от настроек рендеринга).
+
+```python
+def to_representation(self, instance):
+    """Convert `username` to lowercase."""
+    ret = super().to_representation(instance)
+    ret['username'] = ret['username'].lower()
+    return ret
+```
+
+`to_internal_value(self, data)` - принимает невалидированные данные из запроса, возвращает проверенные данные, которые доступны в `serializer.validated_data` и передаются в методы `create()` или `update()`, если вызван `save()`.
+
+`data`является значением request.data, его тип данных зависит от настроек парсера.
+
+#### Наследование сериализатора
+
+Сериализаторы можно расширить и переиспользовать применяя наследование. Для этого у родительского класса нужно объявить общие поля и методы, которые понадобятся детям.
+Мета-класс не наследуется неявно, чтобы он наследовался нужно сделать это явно(не рекомендуется):
+```python
+class AccountSerializer(MyBaseSerializer):
+    class Meta(MyBaseSerializer.Meta):
+    # наследоваться в Meta не рекомендуется
+        model = Account
+```
+```python
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+    # лучше не наследоваться, а объявлять явно параметры Meta для каждого сериализатора:
+        model = Book
+        fields = ['title', 'author', 'published_date', 'isbn']
+        read_only_fields = ['author']
+```
+
+Можно явно удалить поле, указав значение None, если оно было явно определено в родительском классе.
+Если же поле было получено из модели, оно не удалится - нужно использовать [Выбор полей](#выбор-полей).
+```python
+class MyBaseSerializer(ModelSerializer):
+    my_field = serializers.CharField()
+
+class MySerializer(MyBaseSerializer):
+    my_field = None
+```
+
+#### Динамическое изменение полей
+Получение доступа к полям объекта сериализатора, используя аттрибут `.fields` - он позволяет менять поля во время выполнения.
+
+Создадим сериализатор, позволяющий задать поля, которые будут созданы при его инициализации:
+```python
+class DynamicFieldsModelSerializer(serializers.ModelSerializer):
+    """
+    A ModelSerializer that takes an additional `fields` argument that
+    controls which fields should be displayed.
+    """
+
+    def __init__(self, *args, **kwargs):
+        fields = kwargs.pop('fields', None)
+        # сохраняем поля полученные из UserSerializer(user, fields=('id', 'email'))
+        # в fields и удаляем их из kwargs,
+        # чтобы не передавать в родительский класс (ModelSerializer),
+        # который не принимает такие аргументы.
+
+        super().__init__(*args, **kwargs)
+        # для инициалилзации используем конструктор родителя (ModelSerializer)
+        # с полями определенными в Meta UserSerializer
+
+        if fields is not None:
+            # Drop any fields that are not specified in the `fields` argument.
+            allowed = set(fields)  # поля из UserSerializer(user, fields=('id', 'email'))
+            existing = set(self.fields) # поля из Meta UserSerializer
+            for field_name in existing - allowed:
+                self.fields.pop(field_name)  # удалили все поля кроме переданных
+```
+
+Созданный сериализатор позволит выполнить следующее:
+
+```python
+ class UserSerializer(DynamicFieldsModelSerializer):
+    # создадим новый класс, наследуясь от динамического
+    # тк нету своего __init__, возьмет от динамического
+     class Meta:
+        model = User
+        fields = ['id', 'username', 'email']  # existing
+
+print(UserSerializer(user, fields=('id', 'email')))
+# {'id': 2, 'email': 'jon@example.com'}
+# тк поля переданы, то все остальные были удалены
+
+print(UserSerializer(user))
+# {'id': 2, 'username': 'jonwatts', 'email': 'jon@example.com'}
+# тк поля не переданы, вернулись существующие
+```
+
+Такой способ позволяет динамически включать или исключать поля в сериализаторе, исходя из переданного списка fields. Если fields передан в конструктор, то только те поля, которые указаны в этом списке, будут сериализованы. Все остальные поля будут удалены из self.fields и не попадут в сериализованный результат.
+
+
+
+
+
 
 
 
