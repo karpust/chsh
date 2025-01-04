@@ -1084,12 +1084,12 @@ class AlbumSerializer(serializers.ModelSerializer):
 ```
 ```json
 {
-    'album_name': 'Things We Lost In The Fire',
-    'artist': 'Low',
-    'tracks': [
-        '1: Sunflower',
-        '2: Whitetail',
-        '3: Dinosaur Act',
+    "album_name": "Things We Lost In The Fire",
+    "artist": "Low",
+    "tracks": [
+        "1: Sunflower",
+        "2: Whitetail",
+        "3: Dinosaur Act"
     ]
 }
 ```
