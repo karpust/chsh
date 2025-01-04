@@ -1114,15 +1114,15 @@ class AlbumSerializer(serializers.ModelSerializer):
 ```
 ```json
 {
-    'album_name': 'Undun',
-    'artist': 'The Roots',
-    'tracks': [
+    "album_name": "Undun",
+    "artist": "The Roots",
+    "tracks": [
         89,
         90,
-        91,
-        ...
+        91
     ]
 }
+
 ```
 
 ##### HyperlinkedRelatedField
@@ -1146,13 +1146,12 @@ class AlbumSerializer(serializers.ModelSerializer):
 ```
 ```json
 {
-    'album_name': 'Graceland',
-    'artist': 'Paul Simon',
-    'tracks': [
-        'http://www.example.com/api/tracks/45/',
-        'http://www.example.com/api/tracks/46/',
-        'http://www.example.com/api/tracks/47/',
-        ...
+    "album_name": "Graceland",
+    "artist": "Paul Simon",
+    "tracks": [
+        "http://www.example.com/api/tracks/45/",
+        "http://www.example.com/api/tracks/46/",
+        "http://www.example.com/api/tracks/47/"
     ]
 }
 ```
@@ -1180,13 +1179,12 @@ class AlbumSerializer(serializers.ModelSerializer):
 ```
 ```json
 {
-    'album_name': 'Dear John',
-    'artist': 'Loney Dear',
-    'tracks': [
-        'Airport Surroundings',
-        'Everything Turns to You',
-        'I Was Only Going Out',
-        ...
+    "album_name": "Dear John",
+    "artist": "Loney Dear",
+    "tracks": [
+        "Airport Surroundings",
+        "Everything Turns to You",
+        "I Was Only Going Out"
     ]
 }
 ```
@@ -1209,9 +1207,9 @@ class AlbumSerializer(serializers.HyperlinkedModelSerializer):
 ```
 ```json
 {
-    'album_name': 'The Eraser',
-    'artist': 'Thom Yorke',
-    'track_listing': 'http://www.example.com/api/track_list/12/',
+    "album_name": "The Eraser",
+    "artist": "Thom Yorke",
+    "track_listing": "http://www.example.com/api/track_list/12/"
 }
 ```
 опиши аргументы!!!
@@ -1244,15 +1242,16 @@ class AlbumSerializer(serializers.ModelSerializer):
 <Track: Track object>
 >>> serializer = AlbumSerializer(instance=album)
 >>> serializer.data
+```
+```json
 {
-    'album_name': 'The Grey Album',
-    'artist': 'Danger Mouse',
-    'tracks': [
-        {'order': 1, 'title': 'Public Service Announcement', 'duration': 245},
-        {'order': 2, 'title': 'What More Can I Say', 'duration': 264},
-        {'order': 3, 'title': 'Encore', 'duration': 159},
-        ...
-    ],
+    "album_name": "The Grey Album",
+    "artist": "Danger Mouse",
+    "tracks": [
+        {"order": 1, "title": "Public Service Announcement", "duration": 245},
+        {"order": 2, "title": "What More Can I Say", "duration": 264},
+        {"order": 3, "title": "Encore", "duration": 159}
+    ]
 }
 ```
 
@@ -1289,10 +1288,8 @@ class AlbumSerializer(serializers.ModelSerializer):
     ],
 }
 >>> serializer = AlbumSerializer(data=data)
->>> serializer.is_valid()
-True
->>> serializer.save()
-<Album: Album object>
+>>> serializer.is_valid()  # True
+>>> serializer.save()  # <Album: Album object>
 ```
 
 #### Пользовательские реляционные поля
@@ -1320,13 +1317,12 @@ class AlbumSerializer(serializers.ModelSerializer):
 ```
 ```json
 {
-    'album_name': 'Sometimes I Wish We Were an Eagle',
-    'artist': 'Bill Callahan',
-    'tracks': [
-        'Track 1: Jim Cain (04:39)',
-        'Track 2: Eid Ma Clack Shaw (04:19)',
-        'Track 3: The Wind and the Dove (04:34)',
-        ...
+    "album_name": "Sometimes I Wish We Were an Eagle",
+    "artist": "Bill Callahan",
+    "tracks": [
+        "Track 1: Jim Cain (04:39)",
+        "Track 2: Eid Ma Clack Shaw (04:19)",
+        "Track 3: The Wind and the Dove (04:34)"
     ]
 }
 ```
