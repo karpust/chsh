@@ -46,6 +46,13 @@ Custom cheat-sheet for DRF tools and features
        - [HyperlinkedRelatedField](#hyperlinkedrelatedfield)
        - [SlugRelatedField](#slugrelatedfield)
        - [HyperlinkedIdentityField](#hyperlinkedidentityfield)
+     - [Примечания](#римечания)
+       - [queryset](#queryset)
+       - [Настройка отображения HTML](#настройка-отображения-html)
+       - [Отсечение полей](#отсечение-полей)
+       - [Обратные отношения](#обратные-отношения)
+       - [Общие отношения](#общие-отношения)
+       - [ManyToManyFields с промежуточной моделью](#manytomanyfields-с-промежуточной-моделью)
 
 
 
@@ -921,6 +928,7 @@ class DynamicFieldsModelSerializer(serializers.ModelSerializer):
             for field_name in existing - allowed:
                 self.fields.pop(field_name)  # удалили все поля кроме переданных
 ```
+[к содержанию](#содержание)
 
 Созданный сериализатор позволит выполнить следующее:
 
@@ -1056,6 +1064,8 @@ class Track(models.Model):
         return '%d: %s' % (self.order, self.title)
 ```
 
+[к содержанию](#содержание)
+
 ##### StringRelatedField
 `rest_framework.relations.StringRelatedField`
 
@@ -1178,6 +1188,7 @@ class AlbumSerializer(serializers.ModelSerializer):
     ]
 }
 ```
+[к содержанию](#содержание)
 
 ##### HyperlinkedIdentityField
 поле используется для создания ссылки, идентифицирующей объект. Оно автоматически генерирует URL для каждого экземпляра модели на основе указанного представления (view_name).
@@ -1317,6 +1328,7 @@ class AlbumSerializer(serializers.ModelSerializer):
     ]
 }
 ```
+[к содержанию](#содержание)
 
 #### Пользовательские поля с гиперссылками
 если для URL-адресов требуется более одного поля поиска, нужно изменить поведение поля с гиперссылкой.
@@ -1406,17 +1418,24 @@ SELECT * FROM customer
 WHERE organization_slug = 'my-organization' AND id = 5;
 ```
 
-#### Заметки
+#### Примечания
 
 ##### queryset
 для полей отношений read-only queryset не нужен.
 он нужен только для записываемых полей, тк определяет набор объектов для поиска при создании обновлении записей бд.
 если поле записываемое - оно принимает входные данные, и queryset нужен для того чтобы в нем найти соответствующий входным данным объект.
-сопоставить входные данные с объектом модели, а значит, не сможет корректно создать или обновить запись.
+сопоставить входные данные с объектом модели, а значит, корректно создать или обновить запись.
 
 ##### Настройка отображения HTML
-По умолчанию для создания строкового представления объектов в выпадающем списке(choices) используется метод __str__.
-Чтобы это изменить нужно переопределить `display_value()` подкласса `RelatedField`
+Когда Django REST framework отображает HTML-форму в веб-интерфейсе API (например, для создания или обновления объекта), он автоматически создает выпадающий список (select input) для полей, которые являются отношениями (например, ForeignKey или ManyToMany).
+
+Каждый элемент этого выпадающего списка (<option>) должен отображать строку, которую пользователь увидит и сможет выбрать. Эта строка — это название объекта, которое по умолчанию берется из метода __str__ модели, но его можно изменить, переопределив метод display_value().
+
+в выпадающем списке(choices) используются строковые представления объектов (применяется метод __str__ модели).
+
+Чтобы изменить это строковое представление, нужно переопределить `display_value()` подкласса `RelatedField`
+
+`display_value()` получает на вход объект модели и возвращает соответствующее этому объекту строковое представление - строку, которая будет показана пользователю в выпадающем списке.
 ```python
 class TrackPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
     def display_value(self, instance):
@@ -1440,13 +1459,270 @@ class TrackPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
 
 ```
 
-##### Выберите отсечение полей
+[к содержанию](#содержание)
+
+##### Отсечение полей
+Есть модели книга и автор. Книга связана с автором через ForeignKey.
+
+При создании книги через Browsable API, увидим выпадающий список с авторами. Но если в базе данных более 1000 авторов, drf не будет пытаться отобразить всех, а покажет только сообщение: `"More than 1000 items…"`. 
+Это нужно, чтобы уложиться в приемлемое время загрузки страницы.
+
+`html_cutoff` - максимальное количество выборов, которое будет отображаться, по умолчанию 1000, None - нет ограничений.
+
+`html_cutoff_text` - сообщение `"More than {count} items…"` отобразится если элементов больше, чем `html_cutoff`.
+
+Изменить `html_cutoff` локально:
+```python
+class CustomPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    def get_choices(self, cutoff=None):
+        # Устанавливаем локальный лимит для этого поля
+        cutoff = 500  # Или любое другое значение
+        return super().get_choices(cutoff=cutoff)
+```
+
+Изменить `html_cutoff_text` локально:
+```python
+class CustomPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    def get_choices(self, cutoff=None):
+        if cutoff is None:
+            cutoff = 1000  # Лимит элементов по умолчанию
+        queryset = self.get_queryset()
+        if queryset.count() > cutoff:
+            return {'': 'Слишком много элементов... Введите ID вручную.'}
+        return super().get_choices(cutoff=cutoff)
+```
+
+Применение в сериализаторе:
+```python
+class BookSerializer(serializers.ModelSerializer):
+    author = CustomPrimaryKeyRelatedField(queryset=Author.objects.all())
+
+    class Meta:
+        model = Book
+        fields = ['title', 'author']
+```
+
+Изменить глобально: `HTML_SELECT_CUTOFF` и `HTML_SELECT_CUTOFF_TEXT`.
+```python
+# settings.py
+REST_FRAMEWORK = {
+    'HTML_SELECT_CUTOFF': 500,  # Лимит отображаемых элементов
+    'HTML_SELECT_CUTOFF_TEXT': 'Слишком много объектов... Введите ID вручную.'
+}
+```
+
+Если ограничение есть, можно добавить в html форму поле ввода текста для поиска:
+```python
+assigned_to = serializers.SlugRelatedField(
+   queryset=User.objects.all(),
+   slug_field='username',
+   style={'base_template': 'input.html'}
+)
+```
 
 ##### Обратные отношения
+При создании сериализаторов ModelSerializer and HyperlinkedModelSerializer, Django автоматически добавляет только поля, описанные в модели - прямые отношения.
+
+```python
+# models.py
+class Album(models.Model):
+    name = models.CharField(max_length=100)  # прямое отношение
+
+class Track(models.Model):
+    title = models.CharField(max_length=100)
+    album = models.ForeignKey(Album, on_delete=models.CASCADE)
+
+# serializers.py
+class AlbumSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Album
+        fields = ['name']  # можно включить поле name для сериализации
+```
+Обратные отношения не включаются автоматически в ModelSerializer and HyperlinkedModelSerializer, их нужно явно добавить в список полей:
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = ['tracks', ...]
+```
+поэтому для обратных отношений нужно установить такое связанное имя `related_name`, чтобы его можно было использовать как имя поля:
+```python
+class Track(models.Model):
+    album = models.ForeignKey(Album, related_name='tracks', on_delete=models.CASCADE)
+    ...
+```
+если `related_name` не установлено, то в сериализаторе нужно использовать автоматически сгенерированное имя:
+```python
+class AlbumSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = ['track_set', ...]
+```
+`related_name` — имя для обратного отношения в Django моделях.
 
 ##### Общие отношения
+Generic Foreign Key (GFK) — это специальный тип связи, позволяющий модели ссылаться на разные типы объектов. 
 
-##### ManyToManyFields со сквозной моделью
+В Django это достигается с помощью комбинации двух полей:
+- `content_type` — указывает на тип связанного объекта.
+- `object_id` — хранит идентификатор связанного объекта.
+
+`GenericForeignKey` — объединяет эти два поля в одну связь.
+
+Например, модель TaggedItem, связана с моделями Bookmark и Note,
+Те содержит теги, которые можно привязывать как к закладкам (Bookmark), так и к заметкам (Note).
+```python
+class Bookmark(models.Model):
+    """
+    A bookmark consists of a URL, and 0 or more descriptive tags.
+    """
+    url = models.URLField()
+    tags = GenericRelation(TaggedItem)
+
+
+class Note(models.Model):
+    """
+    A note consists of some text, and 0 or more descriptive tags.
+    """
+    text = models.CharField(max_length=1000)
+    tags = GenericRelation(TaggedItem)
+    
+    
+class TaggedItem(models.Model):
+    """
+    Tags arbitrary model instances using a generic relation.
+
+    See: https://docs.djangoproject.com/en/stable/ref/contrib/contenttypes/
+    """
+    tag_name = models.SlugField()
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    tagged_object = GenericForeignKey('content_type', 'object_id')
+
+    def __str__(self):
+        return self.tag_name
+    
+# content_type хранит тип связанного объекта (например, модель Article).
+# object_id хранит ID конкретного объекта.
+# content_object объединяет эти два поля, позволяя работать как с одним.
+```
+
+[к содержанию](#содержание)
+
+По умолчанию DRF не знает, как сериализовать такие связи, потому что GenericForeignKey может ссылаться на объекты разных типов. Поэтому нужно определить кастомное поле, чтобы указать, как именно сериализовать связанные объекты.
+
+Пример:
+```python
+bookmark = Bookmark(url='https://example.com')
+tagged_item = TaggedItem(tag_name='Example Tag', tagged_object=bookmark)
+```
+
+```python
+class TaggedObjectRelatedField(serializers.RelatedField):
+    """
+    A custom field to use for the `tagged_object` generic relationship.
+    """
+
+    def to_representation(self, value):
+        """
+        Serialize tagged objects to a simple textual representation.
+        """
+        if isinstance(value, Bookmark):
+            return 'Bookmark: ' + value.url
+        elif isinstance(value, Note):
+            return 'Note: ' + value.text
+        raise Exception('Unexpected type of tagged object')
+```
+```json
+{
+    "tag_name": "Example Tag",
+    "tagged_object": "Bookmark: https://example.com"
+}
+
+```
+
+То же, но для вложенного представления:
+```python
+def to_representation(self, value):
+        """
+        Serialize bookmark instances using a bookmark serializer,
+        and note instances using a note serializer.
+        """
+        if isinstance(value, Bookmark):
+            serializer = BookmarkSerializer(value)
+        elif isinstance(value, Note):
+            serializer = NoteSerializer(value)
+        else:
+            raise Exception('Unexpected type of tagged object')
+
+        return serializer.data
+```
+```json
+{
+    "tag_name": "Example Tag",
+    "tagged_object": {
+        "url": "https://example.com"
+    }
+}
+```
+
+##### ManyToManyFields с промежуточной моделью
+В Django связь `ManyToManyField` позволяет связывать две модели "многие ко многим". Обычно Django автоматически создаёт промежуточную (`through`) таблицу для такой связи. 
+
+Если нужно добавить дополнительные поля в эту промежуточную таблицу, то нужно создать собственную `through` модель и ассоциировать ее с `ManyToManyField`, передав в аргумент `through`.
+
+
+```python
+class Membership(models.Model):
+    # промежуточная модель, связывает Person и Group.
+    # дополнительные полямя date_joined, role
+    person = models.ForeignKey('Person', on_delete=models.CASCADE)
+    group = models.ForeignKey('Group', on_delete=models.CASCADE)
+    date_joined = models.DateField()
+    role = models.CharField(max_length=50)
+
+class Person(models.Model):
+    name = models.CharField(max_length=100)
+    groups = models.ManyToManyField('Group', through='Membership')
+
+class Group(models.Model):
+    name = models.CharField(max_length=100)
+```
+
+поля, которые ссылаются на ManyToManyField с through моделью, по умолчанию устанавливаются `read-only`. тк добавление и удаление объектов через такую связь требует явного управления данными промежуточной таблицы.
+
+Как сериализовать ManyToManyField с through моделью?
+
+Если нужно просто отобразить связанные объекты, без возможности их редактирования, можно явно указать поле в сериализаторе и установить read_only=True:
+```python
+class GroupSerializer(serializers.ModelSerializer):
+    members = serializers.PrimaryKeyRelatedField(many=True, read_only=True, source='person_set')
+
+    class Meta:
+        model = Group
+        fields = ['name', 'members']
+```
+
+Когда требуется представить дополнительные поля (date_joined, role) из промежуточной модели, можно создать отдельный сериализатор для этой модели и использовать её как вложенный объект:
+```python
+class MembershipSerializer(serializers.ModelSerializer):
+    person_name = serializers.CharField(source='person.name')
+    group_name = serializers.CharField(source='group.name')
+
+    class Meta:
+        model = Membership
+        fields = ['person_name', 'group_name', 'date_joined', 'role']
+
+# сериализатор для отображения данных Membership:
+class GroupSerializer(serializers.ModelSerializer):
+    memberships = MembershipSerializer(many=True, read_only=True, source='membership_set')
+
+    class Meta:
+        model = Group
+        fields = ['name', 'memberships']
+```
+
+[к содержанию](#содержание)
+
+
 
 
 
