@@ -1720,6 +1720,9 @@ class GroupSerializer(serializers.ModelSerializer):
 
 [к содержанию](#содержание)
 
+### 1.8. Поля сериализатора
+
+
 
 
 
