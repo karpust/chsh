@@ -1090,6 +1090,8 @@ class AlbumSerializer(serializers.ModelSerializer):
         '1: Sunflower',
         '2: Whitetail',
         '3: Dinosaur Act',
+    ]
+}
 ```
 
 ##### PrimaryKeyRelatedField
