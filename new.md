@@ -1,8 +1,8 @@
 # Содержание
 - [Поля сериализаторов](#поля-сериализаторов)
 - [Основные аргументы](#основные-аргументы)
-  - [read_only](#read-only)
-  - [write_only](#write-only)
+  - [read_only](#read_only)
+  - [write_only](#write_only)
   - [required](#required)
   - [default](#default)
 
