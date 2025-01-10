@@ -2269,8 +2269,6 @@ CustomerReportSerializer():
 
 `queryset` - required, объекты поля с таким ограничением.
 
-`fields` - обязательный, поля для сериализации.
-
 `message`  - сообщение об ошибке.
 
 `lookup ` - тип поиска, by default 'exact' - точное совпадение
