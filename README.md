@@ -53,6 +53,14 @@ Custom cheat-sheet for DRF tools and features
        - [Обратные отношения](#обратные-отношения)
        - [Общие отношения](#общие-отношения)
        - [ManyToManyFields с промежуточной моделью](#manytomanyfields-с-промежуточной-моделью)
+2. [Routers](#routers)
+3. [Authentication](#authentication)
+4. [Permissions](permissions)
+5. [Validators](#validators)
+   - [Виды валидаторов](#виды-валидаторов)
+   - [Ограничения валидаторов в Django REST Framework](#ограничения-валидаторов-в-django-rest-framework)
+   - [Кастомные валидаторы](#кастомные-валидаторы)
+
 
 
 
@@ -1721,6 +1729,858 @@ class GroupSerializer(serializers.ModelSerializer):
 [к содержанию](#содержание)
 
 ### 1.8. Поля сериализатора
+
+# 2. Routers
+Роутеры автоматом связывают viewsets с url-адресами (создают маршруты для viewsets чтобы их не прописывать вручную в urlpatterns).
+Могут использоваться и для APIView (через явную настройку маршрутов).
+Основная задача роутеров - создавать маршруты для стандартных операций (создание, обновление, получение, удаление и т.д.)
+
+```python
+from rest_framework import routers
+
+router = routers.SimpleRouter()  # создали экз маршрутизатора класса SimpleRouter
+router.register(r'users', UserViewSet)  # зарегистрировали в нем view
+router.register(r'accounts', AccountViewSet)
+urlpatterns = router.urls  # созданный список маршрутов сделали основным, в который потом можно добавлять новые маршруты
+```
+аргументы для `register()`:
+обязательные:
+- `prefix` - префикс (например `r'users'`) урла для определенного набора маршрутов
+- `viewset` - набор представлений для обработки сущности 
+необязательные:
+- `basename` - имя для урлов, автоматом генерируется из `queryset` (атрибут заданный во `viewset`), если нет `queryset`(переопределили `get_queryset`), то `basename` нужно явно задать.
+
+`basename` это _начальная_ часть имени view, которая вставляется в урл:
+- URL pattern: `^users/$` Name: `'user-list'` 
+- URL pattern: `^users/{pk}/$` Name: `'user-detail'`
+
+Атрибут .urls экземпляра маршрутизатора представляет собой просто стандартный список шаблонов URL-адресов. Существует несколько различных стилей включения этих URL-адресов.
+
+## включение url адресов в список маршрутов
+`router.urls` - это список маршрутов, которые были автоматически сгенерированы на основе зарегистрированных view.
+
+Способы добавления новых маршрутов в основной список маршрутов `urlpatterns`:
+
+```python
+# добавление вручную: 
+router = routers.SimpleRouter()
+router.register(r'users', UserViewSet)
+router.register(r'accounts', AccountViewSet)
+
+urlpatterns = [
+    path('forgot-password/', ForgotPasswordFormView.as_view()),
+]
+
+urlpatterns += router.urls  # сложение двух списков
+```
+```python
+# джанговский include:
+urlpatterns = [
+    path('forgot-password', ForgotPasswordFormView.as_view()),
+    path('', include(router.urls)),  
+]
+```
+```python
+# джанговский include с указанием namespace
+urlpatterns = [
+    path('forgot-password/', ForgotPasswordFormView.as_view()),
+    path('api/', include((router.urls, 'app_name'))),
+]
+```
+```python
+# с указанием обоих namespace: приложения и экземпляра
+urlpatterns = [
+    path('forgot-password/', ForgotPasswordFormView.as_view()),
+    path('api/', include((router.urls, 'app_name'), namespace='instance_name')),
+]
+```
+Для Hyperlinked serializers:
+Hyperlinked serializers в DRF автоматически генерируют ссылки на представления, используя значение view_name.
+```python
+class UserSerializer(serializers.HyperlinkedModelSerializer):
+    class Meta:
+        model = User
+        fields = ['url', 'username', 'email']
+# По умолчанию, DRF автоматически определяет view_name, 
+# используя шаблон %(model_name)s-detail. 
+# В этом примере DRF ожидает маршрут с именем 'user-detail'. 
+# Но если маршруты были объявлены с namespace, 
+# тк имя маршрута изменяется с user-detail на 'app_name:user-detail'. 
+# нужно вручную указать полное имя маршрута, например:
+url = serializers.HyperlinkedIdentityField(view_name='app_name:user-detail')
+```
+
+namespace что это и зачем:
+нужен, чтобы различать маршруты с одинаковыми именами, если они находятся в разных приложениях. 
+```python
+# urls.py в приложении 'app_name'
+app_name = 'app_name'  # задали namespace в приложении
+
+urlpatterns = [
+    path('users/<int:pk>/', UserDetailView.as_view(), name='user-detail'),
+]
+# Когда в основном urls.py этот набор маршрутов подключается 
+# с пространством имен, он будет доступен как 
+# app_name:user-detail, а не просто user-detail
+```
+```python
+url = serializers.HyperlinkedIdentityField(view_name='app_name:user-detail')
+```
+
+## Маршрутизация дополнительных действий добавленных во viewset
+```python
+from myapp.permissions import IsAdminOrIsSelf
+from rest_framework.decorators import action
+
+class UserViewSet(ModelViewSet):
+    ...
+
+    @action(methods=['post'], detail=True, permission_classes=[IsAdminOrIsSelf])
+    def set_password(self, request, pk=None):
+        ...
+# через @action во viewset добавляются дополнительные действия, 
+# для которых автоматом генерируются маршруты.
+```
+Шаблон URL: `^users/{pk}/set_password/$`
+Имя URL: `'user-set-password'`
+
+По умолчанию шаблон URL генерируется на основе имени метода, а имя маршрута создается как комбинация basename ViewSet'а и имени метода, записанного через дефис.
+Если вы хотите использовать собственные значения для имени маршрута или URL, можно передать аргументы url_path и url_name в декоратор @action.
+```python
+from myapp.permissions import IsAdminOrIsSelf
+from rest_framework.decorators import action
+
+class UserViewSet(ModelViewSet):
+    ...
+
+    @action(methods=['post'], detail=True, permission_classes=[IsAdminOrIsSelf],
+            url_path='change-password', url_name='change_password')
+    def set_password(self, request, pk=None):
+        ...
+```
+URL path: `^users/{pk}/change-password/$`
+URL name: `'user-change_password'`
+
+## SimpleRouter
+автоматически создает маршруты для стандартного набора действий: list, create, retrieve, update, partial_update и destroy, но не создает корневой путь api:
+```python
+# по умолчанию URLs, создаваемые SimpleRouter, заканчиваются на /,
+# чтобы изменить это:
+router = SimpleRouter(trailing_slash=False)
+```
+
+```python
+# По умолчанию SimpleRouter использует регулярные выражения для маршрутов,
+# чтобы изменить это:
+router = SimpleRouter(use_regex_path=False)
+# но только в джанге 2.x и выше
+```
+в урле могут быть использованы все значения кроме слэша и точки.
+чтобы больше ограничить возможные значения можно использовать:
+```python
+class MyModelViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    lookup_field = 'my_model_id'  # поле для поиска значения по бд( вместо дефолтного pk)
+    lookup_value_regex = '[0-9a-f]{32}'  # regex определяет, какие значения могут использоваться в URL
+
+class MyPathModelViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    lookup_field = 'my_model_uuid'
+    lookup_value_converter = 'uuid'  # преобразователь пути uuid проверяет, что значение в URL является корректным UUID 
+                                     # формата 8-4-4-4-12 (например, 123e4567-e89b-12d3-a456-426614174000)
+```
+
+## DefaultRouter
+Генерирует стандартные пути + включает корневой путь api:
+```python
+from rest_framework.routers import DefaultRouter
+from myapp.views import UserViewSet
+
+router = DefaultRouter()
+router.register(r'users', UserViewSet)
+```
+
+## Custom Routers
+
+# Authentication
+
+- _Аутентификация_ — (кто?) это процесс идентификации пользователя системой в которую он входит.
+- _Авторизация_ — (что?) это процесс, проверяющий, имеет ли пользователь права на выполнения действия.
+
+Аутентификация - это механизм связывания входящего запроса с набором идентификационных данных.
+Выполняется в самом начале обработки представления, до того как происходят проверки разрешений и ограничений
+Схема аутентификации - это список классов. С каждым из них drf будет пытаться идентифицировать запрос. Значения request.user и request.auth установятся классом, который выполнит аутентификацию успешно.
+
+## Установка схемы аутентификации
+глобально:
+```python
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.BasicAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ]
+}
+```
+локально, для каждого представления:
+```python
+class ExampleView(APIView):
+    authentication_classes = [SessionAuthentication, BasicAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, format=None):
+        content = {
+            'user': str(request.user),  # `django.contrib.auth.User` instance.
+            'auth': str(request.auth),  # None
+        }
+        return Response(content)
+
+@api_view(['GET'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([IsAuthenticated])
+def example_view(request, format=None):
+    content = {
+        'user': str(request.user),  # Экземпляр `django.contrib.auth.User`.
+        'auth': str(request.auth),  # None
+    }
+    return Response(content)
+```
+ошибки:
+
+- HTTP 401 Unauthorized
+- HTTP 403 Permission Denied
+
+Ответы HTTP 401 всегда должны включать заголовок `WWW-Authenticate`, который подсказывает клиенту, как аутентифицироваться. Ответы HTTP 403 не включают заголовок `WWW-Authenticate`.
+
+## Виды аутентификации в DRF
+
+## BasicAuthentication
+подходит только для тестирования.
+Basic Authentication передает имя пользователя и пароль в открытом виде (хотя и закодированные в base64), что делает этот метод небезопасным при передаче по незащищенному каналу (например, HTTP). Поэтому его следует использовать только с HTTPS, чтобы избежать перехвата данных.
+Также необходимо убедиться, что клиенты API всегда будут запрашивать имя пользователя и пароль при входе в систему и никогда не будут хранить эти данные в постоянном хранилище.
+```python
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.BasicAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',  # Требуется авторизация для доступа
+    ],
+}
+```
+можно комбинировать:
+```python
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.BasicAuthentication',    # Для тестирования и отладки
+        'rest_framework.authentication.TokenAuthentication',    # Основной метод для продакшена
+        'rest_framework.authentication.SessionAuthentication',  # Для веб-интерфейса с авторизацией через сессии
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',  # Требуется аутентификация для всех запросов
+    ],
+}
+```
+
+## Token Authentication
+
+Аутентификация через токены
+
+Как работает:
+
+Token Authentication — это механизм, при котором каждый запрос от клиента включает токен в заголовке авторизации (обычно в виде Authorization: Token <token>). Токен обычно выдается пользователю при его успешной аутентификации (например, при регистрации или логине).
+
+Настройка:
+
+configure the authentication classes to include TokenAuthentication
+```python
+INSTALLED_APPS = [
+    'rest_framework.authtoken'
+]
+```
+make manage.py migrate
+
+create token for users:
+```python
+from rest_framework.authtoken.models import Token
+
+token = Token.objects.create(user=...)
+print(token.key)
+```
+now token key should be included in the Authorization HTTP header as `Authorization: Token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b`
+
+### генерация токенов
+с использованием сигналов:
+```python
+# models.py:
+from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from rest_framework.authtoken.models import Token
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_auth_token(sender, instance=None, created=False, **kwargs):
+    if created:
+        Token.objects.create(user=instance)
+```
+```python
+# генерировать токен для уже существующего юзера:
+from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
+
+for user in User.objects.all():
+    Token.objects.get_or_create(user=user)
+```
+
+предоставляя API endpoint:
+```python
+# urls.py:
+from rest_framework.authtoken import views
+urlpatterns += [
+    path('api-token-auth/', views.obtain_auth_token)
+]
+```
+
+используя джанго админку:
+```python
+# admin.py:
+from rest_framework.authtoken.admin import TokenAdmin
+
+TokenAdmin.raw_id_fields = ['user']
+```
+
+испльзуя команду manage.py:
+
+`/manage.py drf_create_token <username>`
+
+return `Generated token 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b for user user1`
+
+чтобы восстановить токен:
+
+`./manage.py drf_create_token -r <username>`
+
+
+## Session Authentication   
+используется по умолчанию
+
+настройка:
+```python
+# settings.py:
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
+```
+для сессионной аутентификации в drf создана форма ввода login/logout.
+
+подключить форму:
+```python
+# urls.py:
+urlpatterns = [
+    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
+]
+```
+Как работает:
+
+Когда пользователь входит в систему (через форму или API), Django создает сессию и сохраняет её идентификатор в cookie. В каждом последующем запросе браузер отправляет cookie с сессионным ID, который сервер использует для идентификации пользователя. Если сессионный ID в cookie совпадает с сессионным ID, хранящимся на сервере, и сессия действительна, пользователь считается аутентифицированным.
+
+Где и зачем использовать:
+- Подходит для веб-приложений, с формами для входа, т к сессия позволяет серверу "запомнить" пользователя, чтобы ему не приходилось повторно вводить логин и пароль на каждой странице. 
+
+- Django автоматически использует сессию для проверки CSRF (защиты от межсайтовой подделки запросов).
+
+- В традиционных веб-приложениях, где страницы обновляются полностью, а не динамически через AJAX, сессии позволяют "запомнить" пользователя между загрузками страниц.
+
+По умолчанию для совместимости с веб-приложениями, созданными на базе Django, где сессии являются стандартом. Однако для RESTful API, работающих с внешними клиентами, лучше использовать токен- или JWT-аутентификацию, чтобы соблюдать принцип «stateless».
+
+# Permissions
+виды прав: 
+  -  `AllowAny`
+  -  `IsAuthenticated`
+  -  `IsAdminUser`
+  -  `IsAuthenticatedOrReadOnly`
+  -  `DjangoModelPermissions`
+  -  `DjangoModelPermissionsOrAnonReadOnly`
+  -  `DjangoObjectPermissions`
+
+настройка глобально:
+```python
+# settings.py:
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+        # 'rest_framework.permissions.AllowAny' - по умолчанию разрешено всем
+    ]
+}
+```
+локально, переопределит глобальную настройку для этого view:
+```python
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+
+
+class ExampleView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, format=None):
+        content = {
+            'status': 'request was permitted'
+        }
+        return Response(content)
+
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def example_view(request, format=None):
+    content = {
+        'status': 'request was permitted'
+    }
+    return Response(content)
+```
+
+кастомные разрешения
+
+нужно унаследоваться от `BasePermission` и переопределить методы `.has_permission` и/или `.has_object_permission`, где:
+
+- `has_object_permission(self, request, view, obj)` - вызывается для каждого объекта и проверяет доступ к нему.
+- `has_permission(self, request, view)` - проверяет есть ли права доступа ко всему представлению, может ли пользователь вообще выполнять запрос к данному API-endpoint(url).
+```python
+from rest_framework.permissions import BasePermission
+
+class IsAdminUser(BasePermission):
+    def has_permission(self, request, view):
+        # проверяет, что пользователь аутентифицирован (request.user существует) 
+        # и имеет статус администратора (is_staff)
+        return request.user and request.user.is_staff
+```
+```python
+from rest_framework.permissions import BasePermission
+
+class IsOwner(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Доступ разрешён только если пользователь является владельцем объекта
+        # чтобы изменяли только свое 
+        return obj.owner == request.user
+```
+```python
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class ReadOnlyOrAuthenticated(BasePermission):
+    def has_permission(self, request, view):
+        # Доступ к чтению разрешён всем
+        if request.method in SAFE_METHODS:  
+        # если в списке безопасных методов HTTP: GET, HEAD, OPTIONS
+            return True
+        # если в списке небезопасных: POST, PUT, DELETE
+        # Доступ к записи разрешён только аутентифицированным пользователям
+        return request.user and request.user.is_authenticated
+```
+```python
+from rest_framework.permissions import BasePermission
+
+class IsManagerOrOwner(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Менеджеры имеют доступ ко всем объектам
+        if request.user.role == 'manager':
+            return True
+        # Владелец имеет доступ только к своим объектам
+        return obj.owner == request.user
+```
+
+объединение разрешений
+```python
+class ReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        return request.method in SAFE_METHODS
+
+class ExampleView(APIView):
+    permission_classes = [IsAuthenticated|ReadOnly]  # можно если ReadOnly наследовался от BasePermission
+
+    def get(self, request, format=None):
+        content = {
+            'status': 'request was permitted'
+        }
+        return Response(content)
+
+# it supports & (and), | (or) and ~ (not).
+# здесь | используется для создания объединённого разрешения, 
+# которое пропускает запрос, если хотя бы одно из разрешений возвращает True
+```
+DRF поддерживает _объединение разрешений_ с помощью побитовых операций (&, |, ~).
+(классы разрешений реализуют методы `__or__`, `__and__`, `__invert__`).
+Использование | упрощает код, делая его более читаемым и декларативным.
+
+Чтобы написать то же без использования |, придется создать кастомное разрешение вручную:
+
+```python
+class CustomPermission(BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated or request.method in SAFE_METHODS
+```
+
+```python
+# & - если нужно разрешить доступ, когда оба разрешения возвращают True:
+permission_classes = [IsAuthenticated & SomeOtherPermission]
+```
+```python
+# ~ (НЕ) - Инвертирует разрешение:
+permission_classes = [~IsAuthenticated]  # доступ только для неаутентифицированных пользователе
+```
+
+## Validators
+
+В drf валидация выполняется полностью в сериализаторах.
+
+Если используется класс `Serializer`, можно повторить поведение тех же валидаторов, что используются в `ModelSerializer`, отличие в том, что в `ModelSerializer` валидаторы срабатывают автоматически, а в `Serializer` их нужно прописать явно.
+
+Все валидаторы которые используются для поля можно посмотреть через `repr(instance_serializer)`
+```python
+# models.py:
+class CustomerReportRecord(models.Model):
+    time_raised = models.DateTimeField(default=timezone.now, editable=False)
+    reference = models.CharField(unique=True, max_length=20)
+    description = models.TextField()
+
+# serializers.py:
+class CustomerReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerReportRecord
+
+# python console:
+>>> from project.example.serializers import CustomerReportSerializer
+>>> serializer = CustomerReportSerializer()
+>>> print(repr(serializer))
+
+# output:
+CustomerReportSerializer():
+    id = IntegerField(label='ID', read_only=True)
+    time_raised = DateTimeField(read_only=True)
+    reference = CharField(max_length=20, validators=[<UniqueValidator(queryset=CustomerReportRecord.objects.all())>])
+    description = CharField(style={'type': 'textarea'})
+```
+смотреть как на поле reference сработал валидатор уникальности.
+
+### Виды валидаторов
+
+`UniqueValidator`
+
+проверяет что поле уникально, принимает:
+
+`queryset` - required, объекты поля с таким ограничением.
+
+`fields` - обязательный, поля для сериализации.
+
+`message`  - сообщение об ошибке.
+
+`lookup ` - тип поиска, by default 'exact' - точное совпадение
+
+```python
+from rest_framework.validators import UniqueValidator
+
+slug = SlugField(
+    max_length=100,
+    validators=[UniqueValidator(queryset=BlogPost.objects.all())]
+  
+# validators=[UniqueValidator(queryset=User.objects.all(), lookup='iexact')]
+  
+# 'iexact' - ищет без учета регистра.
+# 'contains' — содержится ли значение в поле.
+# 'icontains' — содержится ли значение в поле, без учета регистра.
+# 'gt', 'lt', 'gte', 'lte' — для числовых значений, сравнивая их с полем.
+)
+```
+
+`UniqueTogetherValidator`
+
+проверяет, что поля уникальны в своей комбинации, принимает:
+
+`queryset` - required, объекты поля с таким ограничением.
+
+`fields` - required, поля для сериализации.
+
+`message` - необязательный - сообщение об ошибке когда валидация провалилась
+
+```python
+from rest_framework.validators import UniqueTogetherValidator
+
+class ExampleSerializer(serializers.Serializer):
+    # ...
+    class Meta:
+        # ToDo items belong to a parent list, and have an ordering defined
+        # by the 'position' field. No two items in a given list may share
+        # the same position.
+        validators = [
+            UniqueTogetherValidator(
+                queryset=ToDoItem.objects.all(),
+                fields=['list', 'position']
+            )
+        ]
+```
+если поле с ограничением уникальности может принимать значение по умолчанию, то встретив такое значение `UniqueValidator` не будет его райзить.
+
+`UniqueForDateValidator`
+`UniqueForMonthValidator`
+`UniqueForYearValidator`
+проверяет, что поля уникальны за период (день, месяц, год), принимает:
+
+`queryset` - required, объекты поля с таким ограничением.
+
+`field` - required, имя поля которое должно быть уникальным.
+
+`date_field` - required, поле дат, по которому будет выбираться заданный диапазон.
+
+`message` - сообщение об ошибке когда валидация провалилась
+
+```python
+from rest_framework.validators import UniqueForYearValidator
+
+class ExampleSerializer(serializers.Serializer):
+    # ...
+    class Meta:
+        # все посты где slug уникален в течение этого года.
+        validators = [
+            UniqueForYearValidator(
+                queryset=BlogPostItem.objects.all(),
+                field='slug',
+                date_field='published'
+            )
+        ]
+```
+```python
+published = serializers.DateTimeField(required=True)  # for writable date_field
+published = serializers.DateTimeField(read_only=True, default=timezone.now)  # for read-only date_field
+published = serializers.HiddenField(default=timezone.now)  # hidden date_field
+# HiddenField не принимает пользовательский ввод, 
+# но всегда возвращает значение по умолчанию в поле validated_data в сериализаторе.
+# HiddenField() does not appear in partial=True serializer(PATCH request)
+```
+
+- Поле `date_field` обязательно для сериализации.
+
+- Если в модели для этого поля задано значение по умолчанию, его нужно явно указать в сериализаторе, на случай если пользователь не введет дату. 
+
+- Так как значение по умолчанию подставляется после валидации, сериализатор должен получить поле до валидации, чтобы корректно выполнить валидацию.
+
+- Поэтому нужно либо явно передать сериализатору значение по умолчанию из модели, либо заставить пользователя всегда вводить дату:
+```python
+class Event(models.Model):
+    name = models.CharField(max_length=100)
+    date = models.DateField(default=now)
+
+class EventSerializer(serializers.ModelSerializer):
+    date = serializers.DateField(required=True)  # заставит юзера всегда вводить
+    # date = serializers.DateField()  # подставит значение по умолчанию из модели
+
+    class Meta:
+        model = Event
+        fields = ['name', 'date']
+```
+
+HiddenField - поля для скрытых данных.
+
+для выполнения валидации могут понадобиться скрытые поля. `HiddenField` - это тип полей, доступ к которым имеет только внутренняя логика, но не пользователь API.
+Значение полей HiddenField будет в `validated_data`, но не среди сериализованных данных.
+Используется для передачи данных внутри сериализатора.
+
+`read_only=True` не будет использовать аргумент `default=`..., потому что оно предназначено только для чтения.
+
+С полями `HiddenField` часто используются классы `CurrentUserDefault` и `CreateOnlyDefault`.
+
+- `CurrentUserDefault`
+устанавливает текущее значение пользователя (`request.user`) в поле. Для этого нужно передать объект `request` в контексте сериализатора.
+```python
+from rest_framework import serializers
+
+class PostSerializer(serializers.ModelSerializer):
+    owner = serializers.HiddenField(
+        default=serializers.CurrentUserDefault()  
+        # Устанавливает текущего пользователя как владельца
+    )
+    
+    class Meta:
+        model = Post
+        fields = ['title', 'content', 'owner']
+
+# при создании экз сериализатора, передать контекстный словарь:
+serializer = PostSerializer(data=request_data, context={'request': request})
+```
+
+- `CreateOnlyDefault`
+устанавливает значение по умолчанию только при создании объекта. При обновлениях это поле игнорируется.
+
+```python
+from rest_framework import serializers
+from django.utils import timezone
+
+class PostSerializer(serializers.ModelSerializer):
+    created_at = serializers.DateTimeField(
+        default=serializers.CreateOnlyDefault(timezone.now)  
+        # Устанавливает текущую дату и время только при создании, но не при обновлении
+    )
+    
+    class Meta:
+        model = Post
+        fields = ['title', 'content', 'created_at']
+
+```
+
+### Ограничения валидаторов в Django REST Framework
+
+- Неопределённые случаи и явная валидация: 
+
+Когда стандартные валидаторы, генерируемые `ModelSerializer`, не подходят, требуется ручная валидация.
+
+Для этого нужно отключить их, указав пустой список для `validators` в классе `Meta`.
+
+```python
+class BillingRecordSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        # Ваша кастомная валидация
+        return attrs
+
+    class Meta:
+        fields = ['client', 'date', 'amount']
+        extra_kwargs = {'client': {'required': False}}
+        validators = []  # Убираем стандартные валидаторы
+```
+
+- Необязательные поля и уникальность: 
+
+При использовании `unique_together` все поля, входящие в это ограничение, по умолчанию считаются обязательными. Если одно из полей должно быть необязательным, валидация становится неопределенной.
+
+Чтобы это исправить нужно убрать валидатор из сериализатора и написать кастомную логику в `.validate()` или в представлении.
+```python
+Копировать код
+class BillingRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = ['client', 'date', 'amount']
+        extra_kwargs = {'client': {'required': False}}
+        validators = []  # Отключаем стандартную валидацию уникальности
+```
+
+- Обновление вложенных сериализаторов: 
+
+При обновлении экземпляра объекта стандартные валидаторы уникальности исключают текущий экземпляр из проверки, чтобы с ним не было конфликта. Для вложенных сериализаторов это не применимо, тк текущий экземпляр не доступен для проверки, тк экземпляр родительского объекта не передаётся в сериализатор вложенного объекта.
+
+Чтобы это исправить нужно написать кастомную валидацию, где получить доступ к текущему экземпляру и исключить его из проверки уникальности.
+```python
+# models:
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+class Book(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author, related_name='books', on_delete=models.CASCADE)
+
+
+class AuthorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Author
+        fields = ['name']
+
+# serializers:
+class BookSerializer(serializers.ModelSerializer):
+    author = AuthorSerializer()
+
+    class Meta:
+        model = Book
+        fields = ['title', 'author']
+
+    def validate_title(self, value):
+        # Если мы обновляем объект, исключаем текущий экземпляр из проверки уникальности
+        book_instance = self.instance  # Текущий экземпляр (который обновляется)
+        if book_instance:
+            # Исключаем текущий экземпляр из проверки уникальности
+            if Book.objects.filter(title=value).exclude(id=book_instance.id).exists():
+                raise serializers.ValidationError("This title is already taken.")
+        else:
+            # Если объект новый (создаётся), просто проверяем уникальность
+            if Book.objects.filter(title=value).exists():
+                raise serializers.ValidationError("This title is already taken.")
+        
+        return value
+```
+
+- Отладка сложных случаев: 
+
+Чтобы понять, как `ModelSerializer` генерирует валидаторы и поля, нужно использовать `manage.py shell`, чтобы вывести сериализатор и изучить его.
+```python
+serializer = MyComplexModelSerializer()
+print(serializer)
+```
+Для сложных случаев лучше явно определить сериализатор вместо того, чтобы полагаться на стандартное поведение `ModelSerializer`, чтобы поведение было более понятным.
+
+
+
+### Кастомные валидаторы
+
+- функции-валидаторы:
+
+```python
+# создание:
+def even_number(value):
+    if value % 2 != 0:
+        raise serializers.ValidationError('This field must be an even number.')
+    
+# применение:
+class MySerializer(serializers.Serializer):
+    number = serializers.IntegerField(validators=[even_number])
+```
+
+- валидаторы уровня поля:
+
+```python
+class MySerializer(serializers.Serializer):
+    number = serializers.IntegerField()
+
+    def validate_number(self, value):
+        # DRF будет вызывать метод автоматически только для поля number на основе его имени.
+        if value % 2 != 0:
+            raise serializers.ValidationError('This field must be an even number.')
+        return value
+```
+
+- классы-валидаторы:
+
+```python
+# создание:
+class MultipleOf:
+    def __init__(self, base):
+        self.base = base
+
+    def __call__(self, value):
+        if value % self.base != 0:
+            message = 'This field must be a multiple of %d.' % self.base
+            raise serializers.ValidationError(message)
+
+# применение:
+class MySerializer(serializers.Serializer):
+    number = serializers.IntegerField(validators=[MultipleOf(3)])
+```
+
+Доступ к контексту
+
+Если указать `requires_context = True`, метод `__call__` валидатора будет вызываться с дополнительным аргументом `serializer_field`, который даёт доступ к полю сериализатора.
+```python
+class MultipleOf:
+    requires_context = True
+
+    def __call__(self, value, serializer_field):
+        # использование serializer_field для проверки,
+        # является ли поле обязательным, например.
+        if value % 3 != 0:
+            raise serializers.ValidationError('This field must be a multiple of 3.')
+# где: 
+# value — значение поля, которое нужно проверить
+# serializer_field — объект, представляющий поле, для которого выполняется валидация.
+```
+
+
+
+
+
+
 
 
 
