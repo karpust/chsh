@@ -57,7 +57,7 @@ Custom cheat-sheet for DRF tools and features
 3. [Authentication](#authentication)
 4. [Permissions](permissions)
 5. [Validators](#validators)
-   - [Виды валидаторов](#виды-валидаторов)
+   - [Виды валидаторов DRF](#виды-валидаторов-drf)
    - [Ограничения валидаторов в Django REST Framework](#ограничения-валидаторов-в-django-rest-framework)
    - [Кастомные валидаторы](#кастомные-валидаторы)
 
@@ -2259,9 +2259,9 @@ CustomerReportSerializer():
     reference = CharField(max_length=20, validators=[<UniqueValidator(queryset=CustomerReportRecord.objects.all())>])
     description = CharField(style={'type': 'textarea'})
 ```
-смотреть как на поле reference сработал валидатор уникальности.
+смотреть как на поле reference сработал валидатор уникальности. Но это валидатор drf, а джанговский валидатор сработавший на том же поле на max_length не показался...
 
-### Виды валидаторов
+### Виды валидаторов DRF
 
 `UniqueValidator`
 
